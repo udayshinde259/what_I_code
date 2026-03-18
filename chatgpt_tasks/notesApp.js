@@ -2,46 +2,51 @@ const express = require("express");
 const jwt = require("jsonwebtoken");
 JWT_SECRET = "thisismyjwtuday";
 const app = express();
+const { UserModel, NotesModel } = require("./db");
+const mongoose = require("mongoose");
 
-let notes = [];
-let users = [];
-let id = 1;
 app.use(express.json());
 
-app.post("/regiter", function (req, res) {
-  let username = req.body.username;
+mongoose.connect("mongodb+srv://udayshinde259_db_user:uday8881@cluster0.kguish1.mongodb.net/Notes")
+  .then(() => console.log("DB connected"))
+  .catch(err => console.log(err));
+
+app.post("/register", async function (req, res) {
+  let email = req.body.email;
   let password = req.body.password;
 
-  let found = users.find((u) => u.username === username);
-
-  if (found) {
-    res.json({
-      error: "username is already taken",
+  try{
+    await UserModel.create({
+      email: email,
+      password: password,
     });
-    return;
+
+    res.json({
+      msg: "Registered Sucessfully"
+    })
+    
+  }catch(e){
+    return res.status(400).json({
+      msg: "Incorrect Credentials"
+    });
   }
 
-  let user = {
-    username: username,
-    password: password,
-  };
-
-  users.push(user);
-  res.json({ msg: "User registered sucessfully" });
+  
 });
 
-app.post("/signup", function (req, res) {
-  let username = req.body.username;
+app.post("/signup", async function (req, res) {
+  let email = req.body.email;
   let password = req.body.password;
 
-  let foundUser = users.find(
-    (u) => u.username === username && u.password === password,
-  );
+  let foundUser = await UserModel.findOne({
+    email: email,
+    password: password
+  })
 
   if (foundUser) {
     let token = jwt.sign(
       {
-        username,
+        id: foundUser._id.toString(),
       },
       JWT_SECRET,
     );
@@ -50,7 +55,7 @@ app.post("/signup", function (req, res) {
       token: token,
     });
   } else {
-    res.json({
+    return res.json({
       error: "Please regiser first",
     });
   }
@@ -59,10 +64,9 @@ app.post("/signup", function (req, res) {
 function auth(req, res, next) {
   let token = req.headers.token;
 
-
   try {
     let decodedData = jwt.verify(token, JWT_SECRET);
-    req.username = decodedData.username;
+    req.id = decodedData.id;
     next();
   } catch {
     return res.status(401).json({
@@ -71,10 +75,10 @@ function auth(req, res, next) {
   }
 }
 
-app.post("/notes", auth, function (req, res) {
+app.post("/notes", auth, async function (req, res) {
   let title = req.body.title;
   let content = req.body.content;
-  let username = req.username;
+  let id = req.id;
 
   if (!title || !content) {
     return res.json({
@@ -82,99 +86,122 @@ app.post("/notes", auth, function (req, res) {
     });
   }
 
-  let newNote = {
-    id: id,
-    username: username,
+  try{
+    await NotesModel.create({
+    userId: id,
     title: title,
     content: content,
-    createdAt: new Date(),
-  };
-  id++;
-  notes.push(newNote);
+  })
+
   res.json({
-    msg: "New note created sucessfully",
-  });
+    msg: "Created the note sucessfully"
+  })
+  }catch(e){
+    res.status(400).send(e);
+  }
+  
 });
 
-app.get("/notes", auth, function (req, res) {
-  let username = req.username;
+app.get("/notes", auth, async function (req, res) {
+  let id = req.id;
 
-  let userNotes = notes.filter((u) => u.username == username);
-  if (userNotes) {
-    res.json(userNotes);
-  } else {
-    res.json({
-      msg: "No notes present",
-    });
+  try {
+    let allNotes = await NotesModel.find({
+    userId: id
+  })
+
+  res.json(allNotes)
+  } catch (error) {
+    return res.status(400).json({
+      error: "No notes present"
+    })
   }
 });
 
-app.get("/notes/:id", auth, function (req, res) {
-  let id = parseInt(req.params.id);
-  let username = req.username;
-  let note = notes.find((u) => u.id == id && u.username == username);
+app.get("/notes/:id", auth, async function (req, res) {
+  let notesId = req.params.id;
+  let userId = req.id;
+  
+
+  try {
+    let note = await NotesModel.find({
+    userId: userId,
+    _id: new mongoose.Types.ObjectId(notesId)
+  })
 
   if (note) {
     res.json(note);
   } else {
     res.status(404).json({
-      error: "Not Found",
-    });
+      error: "Note not found"
+    })
+  }
+  } catch (error) {
+    return res.status(400).json({
+      error: "No notes present"
+    })
   }
 });
 
-app.put("/notes/:id", auth, function (req, res) {
-  let username = req.username;
-  let id = parseInt(req.params.id);
+app.put("/notes/:id", auth, async function (req, res) {
+  let userId = req.id;
+  let notesId = req.params.id;
   let updatedTitle = req.body.title;
   let updatedContent = req.body.content;
-  let noteNo = -1;
-
-  if (!updatedTitle || !updatedContent) {
-    return res.json({
-      error: "Title and content are required",
-    });
-  }
-
-  for (let i = 0; i < notes.length; i++) {
-    if (notes[i].id === id && notes[i].username === username) {
-      noteNo = i;
+  
+  try {
+    const updatedNote = await NotesModel.findOneAndUpdate(
+    {
+      _id: new mongoose.Types.ObjectId(notesId),
+      userId: userId
+    },
+    {
+      title: updatedTitle,
+      content: updatedContent
+    },
+    {
+      new: true
     }
+  )
+
+  if(!updatedNote){
+    return res.status(404).json({
+        error: "Note not found or not yours"
+      });
   }
 
-  if (noteNo == -1) {
-    res.json({
-      error: "Not Found",
-    });
-  } else {
-    notes[noteNo].title = updatedTitle;
-    notes[noteNo].content = updatedContent;
-    res.json({
-      msg: "The note is updated sucessfully",
+  res.json(updatedNote);
+
+  } catch (error) {
+    res.status(400).json({
+      error: "Invalid request"
     });
   }
 });
 
-app.delete("/notes/:id", auth, function (req, res) {
-  let id = parseInt(req.params.id);
-  let username = req.username;
-  let noteNo = -1;
+app.delete("/notes/:id", auth, async function (req, res) {
+  let notesId = req.params.id;
+  let userId = req.id;
+  
 
-  for (let i = 0; i < notes.length; i++) {
-    if (notes[i].id === id && notes[i].username === username) {
-      noteNo = i;
+  try {
+    const deletedTodo =  await NotesModel.findOneAndDelete({
+      _id: new mongoose.Types.ObjectId(notesId),
+      userId: userId
+    })
+
+    if(!deletedTodo){
+      return res.status(404).json({
+        error: "Note not found or not yours"
+      });
     }
-  }
 
-  if (noteNo == -1) {
     res.json({
-      error: "Not Found",
-    });
-  } else {
-    notes.splice(noteNo, 1);
-    res.json({
-      msg: "The note is deleted sucessfully",
-    });
+      deletedTodo, 
+      msg : "todo is sucessfully deleted"
+    })
+  } catch (error) {
+    
   }
 });
 
