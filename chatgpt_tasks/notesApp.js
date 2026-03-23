@@ -7,7 +7,7 @@ const mongoose = require("mongoose");
 
 app.use(express.json());
 
-mongoose.connect("mongodb+srv://udayshinde259_db_user:uday8881@cluster0.kguish1.mongodb.net/Notes")
+mongoose.connect("")
   .then(() => console.log("DB connected"))
   .catch(err => console.log(err));
 

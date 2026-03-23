@@ -1,18 +1,19 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
-const {UserModel, RoomModel} = require("../chatgpt_tasks/db")
+const mongoose = require("mongoose");
+// const {UserModel, RoomModel} = require("../chatgpt_tasks/db")
 const app = express();
 const JWT_SECRET = "thisismysecretformpqa";
 
-mongoose.connect("mongodb+srv://udayshinde259_db_user:uday8881@cluster0.kguish1.mongodb.net/Notes")
-  .then(() => console.log("DB connected"))
-  .catch(err => console.log(err));
+// mongoose.connect("")
+//   .then(() => console.log("DB connected"))
+//   .catch(err => console.log(err));
 
 
 app.use(express.json());
 
 let users = [];
-let userId = 1;
+let userId = 1; 
 let rooms = [];
 let roomsId = 1;
 
