@@ -13,6 +13,12 @@ const NotesSchema = new Schema({
     userId: String
 })
 
+const RoomSchema = new Schema({
+    hostId: ObjectId,
+    playerId: [],
+    
+})
+
 const UserModel = mongoose.model("user", UserSchema);
 const NotesModel = mongoose.model("notes", NotesSchema);
 
