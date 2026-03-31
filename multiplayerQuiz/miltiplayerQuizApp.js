@@ -1,100 +1,114 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
-// const {UserModel, RoomModel} = require("../chatgpt_tasks/db")
+const bcrypt = require("bcrypt");
+const zod = require("zod");
 const app = express();
-const JWT_SECRET = "thisismysecretformpqa";
+const JWT_SECRET = "thisismysecretformmpqa";
+const { UserModel, RoomModel } = require("./db");
 
-// mongoose.connect("")
-//   .then(() => console.log("DB connected"))
-//   .catch(err => console.log(err));
-
+mongoose
+  .connect(
+    "mongodb+srv://udayshinde259_db_user:uday8881@cluster0.kguish1.mongodb.net/quiz-app",
+  )
+  .then(() => console.log("DB connected"))
+  .catch((err) => console.log(err));
 
 app.use(express.json());
 
-let users = [];
-let userId = 1; 
-let rooms = [];
-let roomsId = 1;
-
 let questions = [
   {
-    question: "Capital of France?",
-    options: ["Paris", "London", "Berlin", "Rome"],
-    answer: "Paris",
+    question: "Capital of Japan?",
+    options: ["Tokyo", "Beijing", "Seoul", "Bangkok"],
+    answer: "Tokyo",
   },
   {
-    question: "5 + 7 = ?",
-    options: ["10", "11", "12", "13"],
-    answer: "12",
+    question: "Largest planet in our solar system?",
+    options: ["Earth", "Mars", "Jupiter", "Saturn"],
+    answer: "Jupiter",
+  },
+  {
+    question: "Who wrote 'Romeo and Juliet'?",
+    options: ["Shakespeare", "Dickens", "Hemingway", "Tolstoy"],
+    answer: "Shakespeare",
+  },
+  {
+    question: "Which gas do plants absorb?",
+    options: ["Oxygen", "Nitrogen", "Carbon Dioxide", "Hydrogen"],
+    answer: "Carbon Dioxide",
   },
 ];
 
-app.post("/signin", function (req, res) {
-  let username = req.body.username;
+app.post("/signup", async function (req, res) {
+  let email = req.body.email;
   let password = req.body.password;
 
-  if (!username || !password) {
+  if (!email || !password) {
     res.status(400).json({
       error: "send username and password ",
     });
     return;
   }
 
-  let found = users.find((u) => u.username === username);
+  const hashedPassword = await bcrypt.hash(password, 5);
 
-  if (found) {
-    res.status(409).json({
-      error: "username is already taken",
+  try {
+    await UserModel.create({
+      email: email,
+      password: hashedPassword,
     });
-    return;
-  }
-
-  let user = {
-    id: userId,
-    username,
-    password,
-  };
-  userId++;
-
-  users.push(user);
-  res.json({
-    msg: "You are sucessfully registered",
-  });
-});
-
-app.post("/signup", function (req, res) {
-  let username = req.body.username;
-  let password = req.body.password;
-
-  if (!username || !password) {
-    res.status(400).json({
-      error: "send username and password ",
-    });
-    return;
-  }
-
-  let foundUser = users.find(
-    (u) => u.username == username && u.password == password,
-  );
-
-  if (foundUser) {
-    let id = foundUser.id;
-    let token = jwt.sign(
-      {
-        id,
-      },
-      JWT_SECRET,
-    );
 
     res.json({
-      token: token,
+      msg: "You have sucessfully signed up",
     });
-  } else {
-    res.status(404).json({
-      error: "Incorrect credentials",
+  } catch (error) {
+    res.status(400).json({
+      error: "User already exits or invaild data",
     });
   }
+});
+
+app.post("/signin", async function (req, res) {
+  let email = req.body.email;
+  let password = req.body.password;
+
+  if (!email || !password) {
+    res.status(400).json({
+      error: "send username and password ",
+    });
+    return;
+  }
+
+  const user = await UserModel.findOne({
+    email: email,
+  });
+
+  if (!user) {
+    res.status(401).json({
+      error: "Incorrect Email",
+    });
+    return;
+  }
+
+  const isMatch = await bcrypt.compare(password, user.password);
+
+  if (!isMatch) {
+    res.status(401).json({
+      error: "Incorrect password",
+    });
+    return;
+  }
+
+  let token = jwt.sign(
+    {
+      id: user._id.toString(),
+    },
+    JWT_SECRET,
+  );
+
+  res.json({
+    token: token,
+  });
 });
 
 function authentication(req, res, next) {
@@ -111,90 +125,93 @@ function authentication(req, res, next) {
   }
 }
 
-app.post("/room", authentication, function (req, res) {
+function generateRoomCode() {
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
+
+app.post("/room", authentication, async function (req, res) {
   let id = req.id;
 
-  let newRoom = {
-    roomId: roomsId,
-    hostId: id,
-    players: [id],
-    scores: { [id]: 0 },
-    questionCount: { [id]: 0 },
-    started: false,
-  };
+  const roomcode = generateRoomCode();
 
-  roomsId++;
-  rooms.push(newRoom);
+  await RoomModel.create({
+    roomcode: roomcode,
+    hostId: id,
+    players: [
+      {
+        userId: id,
+        score: 0,
+        questionCount: 0,
+      },
+    ],
+  });
 
   res.json({
-    roomsId: newRoom.roomId,
+    roomcode: roomcode,
   });
 });
 
-app.post("/rooms/:roomId/join", authentication, function (req, res) {
+app.post("/rooms/:roomcode/join", authentication, async function (req, res) {
   let id = req.id;
-  let roomId = req.params.roomId;
-  let room = rooms.find((u) => u.roomId == roomId);
+  let roomcode = req.params.roomcode;
+  let result = await RoomModel.updateOne(
+    {
+      roomcode: roomcode,
+      "players.userId": { $ne: id },
+    },
+    {
+      $push: {
+        players: {
+          userId: id,
+          score: 0,
+          questionCount: 0,
+        },
+      },
+    },
+  );
 
-  if (!room) {
-    return res.status(409).json({
-      error: "You have already joined the contest",
+  if (result.modifiedCount === 0) {
+    return res.status(400).json({
+      error: "User is already in the room or Room not found",
     });
   }
 
-  let userPresent = room.players.find((u) => u == id);
-
-  if (room.started) {
-    res.status(400).json({
-      error: "the room is already started",
-    });
-    return;
-  }
-
-  if (!userPresent) {
-    if (room) {
-      room.players.push(id);
-      room.questionCount[id] = 0;
-      room.scores[id] = 0;
-      res.json("You have joined the quiz sucessfully");
-    } else {
-      res.status(404).json({
-        error: "Please enter a valid room Id",
-      });
-    }
-  }
+  res.json({
+    msg: "Joined Room Sucessfully",
+  });
 });
 
-app.post("/rooms/:roomId/start", authentication, function (req, res) {
+app.post("/rooms/:roomcode/start", authentication, async function (req, res) {
   let id = req.id;
-  let roomId = req.params.roomId;
-  let room = rooms.find((u) => u.roomId == roomId);
+  let roomcode = req.params.roomcode;
+
+  const room = await RoomModel.findOne({ roomcode });
 
   if (room) {
-    if (room.hostId == id) {
+    if (room.hostId.toString() == id) {
       room.started = true;
+
+      await room.save();
 
       return res.json({
         msg: "Quiz started successfully",
       });
     } else {
-      res.status(404).json({
+      return res.status(403).json({
         error: "Only hosts can start the quiz",
       });
     }
   } else {
-    res.status(404).json({
+    return res.status(404).json({
       error: "Please enter a valid room Id",
     });
   }
 });
 
-app.get("/rooms/:roomId/question", authentication, function (req, res) {
+app.get("/rooms/:roomcode/question", authentication, async function (req, res) {
   let id = req.id;
-  let roomId = req.params.roomId;
-  let room = rooms.find((u) => u.roomId == roomId);
-
-  
+  let roomcode = req.params.roomcode;
+  let room = await RoomModel.findOne({ roomcode });
 
   if (!room) {
     return res.status(404).json({
@@ -208,39 +225,29 @@ app.get("/rooms/:roomId/question", authentication, function (req, res) {
     });
   }
 
+  let player = room.players.find((u) => u.userId.toString() == id);
 
-  let count = room.questionCount[id];
-  let userIsPlayer = room.players.find((u) => u === id);
+  if (!player) {
+    return res.status(404).json({
+      error: "User is not a player",
+    });
+  }
+
+  let count = player.questionCount;
 
   if (count < questions.length) {
-    if (room) {
-      if (userIsPlayer) {
-        let question = questions[count];
-        res.json({
-          question: question.question,
-          options: question.options,
-        });
-      } else {
-        res.status(404).json({
-          error: "Only players who joined group are allowed to ask question",
-        });
-      }
-    } else {
-      res.status(404).json({
-        error: "Please enter a valid room Id",
-      });
-    }
-  } else {
+    let question = questions[count];
     res.json({
-      msg: "The quiz has ended",
+      question: question.question,
+      options: question.options,
     });
   }
 });
 
-app.post("/rooms/:roomId/answer", authentication, function (req, res) {
+app.post("/rooms/:roomcode/answer", authentication, async function (req, res) {
   let id = req.id;
-  let roomId = req.params.roomId;
-  let room = rooms.find((u) => u.roomId == roomId);
+  let roomcode = req.params.roomcode;
+  let room = await RoomModel.findOne({ roomcode });
 
   if (!room) {
     return res.status(404).json({
@@ -248,70 +255,78 @@ app.post("/rooms/:roomId/answer", authentication, function (req, res) {
     });
   }
 
-  let count = room.questionCount[id];
-  let userIsPlayer = room.players.find((u) => u === id);
+  if (!room.started) {
+    return res.status(400).json({
+      error: "Quiz has not started yet",
+    });
+  }
+
+  let player = room.players.find((u) => u.userId.toString() == id);
+
+  if (!player) {
+    return res.status(404).json({
+      error: "User is not a player",
+    });
+  }
+
+  let count = player.questionCount;
   let ans = req.body.answer;
 
+  if (player.questionCount >= questions.length) {
+  return res.status(400).json({
+    error: "Quiz already completed",
+  });
+}
+
   if (!ans) {
-    return res.send(400).json({
+    return res.status(400).json({
       error: "Please send the answer",
     });
-    
   }
 
-  if (room) {
-    if (userIsPlayer) {
-      let correctAnswer = questions[count].answer;
-      room.questionCount[id] += 1;
-      if (ans === correctAnswer) {
-        room.scores[id] += 10;
-      }
-      if (room.questionCount[id] == questions.length) {
-        res.json({
-          msg: "Congrats the quiz has ended",
-        });
-      }
+  let correctAnswer = questions[count].answer;
+  player.questionCount += 1;
+  if (ans === correctAnswer) {
+    player.score += 10;
+  }
+  await room.save();
+  if (player.questionCount >= questions.length) {
+    return res.json({
+      msg: "Congrats the quiz has ended",
+    });
+  }
 
-      return res.json({
-        msg: ans === correctAnswer ? "Correct answer" : "Wrong answer",
-      });
-    } else {
-      res.status(404).json({
-        error: "Only players who joined group can answer",
-      });
-    }
+  if (ans === correctAnswer) {
+    return res.json({
+      msg: "Correct answer",
+    });
   } else {
-    res.status(404).json({
-      error: "Please enter a valid room Id",
+    return res.json({
+      msg: "Wrong answer",
     });
   }
 });
 
-app.get("/rooms/:roomId/leaderboard", authentication, function (req, res) {
+app.get("/rooms/:roomcode/leaderboard", authentication, async function (req, res) {
   let id = req.id;
-  let roomId = req.params.roomId;
-  let room = rooms.find((u) => u.roomId == roomId);
+  let roomcode = req.params.roomcode;
+  let room = await RoomModel.findOne({roomcode});
 
   if (!room) {
     return res.status(404).json({
       error: "Please enter a valid room Id",
     });
   }
-  let userIsPlayer = room.players.find((u) => u === id);
+  let player = room.players.find((u) => u.userId.toString() === id);
 
-  if (room) {
-    if (userIsPlayer) {
-      res.send(room.scores);
+    if (player) {
+      res.send(room.players);
     } else {
       res.status(404).json({
         error: "Only players who joined this room can view leaderboard",
       });
     }
-  } else {
-    res.status(404).json({
-      error: "Please enter a valid room Id",
-    });
-  }
+  
 });
 
 app.listen(3001);
